@@ -1,5 +1,4 @@
 import io
-import json
 import time
 
 import requests
@@ -8,6 +7,7 @@ import openpyxl
 
 from excel_reader import parse_excel
 from setlist_client import fetch_setlist_sync
+from pdf_generator import generate_setlist_pdf, safe_filename
 
 st.set_page_config(page_title="Setlist Lookup", page_icon="🎵", layout="centered")
 st.title("🎵 Setlist Lookup")
@@ -67,6 +67,14 @@ for i, row in enumerate(rows):
                 st.markdown("\n\n".join(lines) if lines else "*Tom setlist*")
                 if result.get("setlist_url"):
                     st.markdown(f"[Öppna på setlist.fm]({result['setlist_url']})")
+                pdf_bytes = generate_setlist_pdf(result)
+                st.download_button(
+                    label="⬇ Ladda ner som PDF",
+                    data=pdf_bytes,
+                    file_name=safe_filename(result["artist"], result["date"]),
+                    mime="application/pdf",
+                    key=f"pdf_{result['id']}",
+                )
 
         elif result["status"] == "not_found":
             st.warning(f"❌ {result['artist']} – {result['date']} – Ingen setlist hittades")
