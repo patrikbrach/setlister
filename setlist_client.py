@@ -1,5 +1,5 @@
-import asyncio
-import httpx
+import time
+import requests
 
 BASE_URL = "https://api.setlist.fm/rest/1.0"
 MAX_RETRIES = 3
@@ -21,19 +21,17 @@ def _parse_setlist(data: dict, row_id: int) -> dict:
 
     for s in sets:
         if s.get("encore"):
-            encore_breaks.append(order - 1)  # index before encore starts
+            encore_breaks.append(order - 1)
         for song in s.get("song", []):
             name = song.get("name", "").strip()
             if not name:
                 continue
-            info = song.get("info", "") or ""
-            songs.append({"order": order, "name": name, "info": info})
+            songs.append({"order": order, "name": name, "info": song.get("info", "") or ""})
             order += 1
 
     venue_data = data.get("venue", {})
-    city_data = venue_data.get("city", {})
+    city_name = venue_data.get("city", {}).get("name", "")
     venue_name = venue_data.get("name", "")
-    city_name = city_data.get("name", "")
     venue_display = f"{venue_name}, {city_name}" if city_name else venue_name
 
     return {
@@ -48,23 +46,14 @@ def _parse_setlist(data: dict, row_id: int) -> dict:
     }
 
 
-async def fetch_setlist(
-    client: httpx.AsyncClient,
+def fetch_setlist_sync(
     api_key: str,
     row_id: int,
     artist: str,
     date: str,
     venue: str | None = None,
 ) -> dict:
-    """
-    Fetch the best matching setlist for artist + date (+ optional venue).
-    Returns a result dict with status "found", "not_found", or "error".
-    """
-    params = {
-        "artistName": artist,
-        "date": date,
-        "p": 1,
-    }
+    params = {"artistName": artist, "date": date, "p": 1}
     if venue:
         params["venueName"] = venue
 
@@ -72,16 +61,15 @@ async def fetch_setlist(
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            resp = await client.get(
+            resp = requests.get(
                 f"{BASE_URL}/search/setlists",
                 params=params,
                 headers=headers,
-                timeout=15.0,
+                timeout=15,
             )
 
             if resp.status_code == 200:
-                data = resp.json()
-                setlists = data.get("setlist", [])
+                setlists = resp.json().get("setlist", [])
                 if not setlists:
                     return {"id": row_id, "status": "not_found", "artist": artist, "date": date, "venue": venue or ""}
                 return _parse_setlist(setlists[0], row_id)
@@ -94,22 +82,16 @@ async def fetch_setlist(
 
             elif resp.status_code == 429:
                 if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY * attempt)
+                    time.sleep(RETRY_DELAY * attempt)
                     continue
                 return {"id": row_id, "status": "error", "message": "Rate limit – försök igen senare", "artist": artist, "date": date}
 
             else:
-                return {
-                    "id": row_id,
-                    "status": "error",
-                    "message": f"HTTP {resp.status_code}",
-                    "artist": artist,
-                    "date": date,
-                }
+                return {"id": row_id, "status": "error", "message": f"HTTP {resp.status_code}", "artist": artist, "date": date}
 
-        except httpx.RequestError as e:
+        except requests.RequestException as e:
             if attempt < MAX_RETRIES:
-                await asyncio.sleep(RETRY_DELAY * attempt)
+                time.sleep(RETRY_DELAY * attempt)
                 continue
             return {"id": row_id, "status": "error", "message": f"Nätverksfel: {e}", "artist": artist, "date": date}
 
