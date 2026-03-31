@@ -1,80 +1,113 @@
 import io
-from fpdf import FPDF
+import os
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib import colors
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+)
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# ── Unicode font setup ────────────────────────────────────
+# Try common TTF locations (Streamlit Cloud / Ubuntu / Mac / Windows)
+_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "C:/Windows/Fonts/arial.ttf",
+]
+
+_UNICODE_FONT = "Helvetica"  # fallback to built-in
+
+for _path in _FONT_CANDIDATES:
+    if os.path.exists(_path):
+        try:
+            pdfmetrics.registerFont(TTFont("UniFont", _path))
+            _UNICODE_FONT = "UniFont"
+        except Exception:
+            pass
+        break
+
+
+def _safe(text: str) -> str:
+    """If we couldn't load a Unicode font, strip non-Latin-1 chars."""
+    if _UNICODE_FONT != "Helvetica":
+        return text
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def _style(name, font=None, size=11, leading=16, bold=False, color=colors.black, space_before=0, space_after=2):
+    f = font or _UNICODE_FONT
+    return ParagraphStyle(
+        name,
+        fontName=f,
+        fontSize=size,
+        leading=leading,
+        textColor=color,
+        spaceBefore=space_before,
+        spaceAfter=space_after,
+    )
 
 
 def generate_setlist_pdf(result: dict) -> bytes:
-    """Generate a PDF for a single found setlist. Returns PDF bytes."""
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_margins(20, 20, 20)
-    pdf.set_auto_page_break(auto=True, margin=20)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+    )
 
-    # ── Header ─────────────────────────────────────────────
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.cell(0, 10, result.get("artist", ""), new_x="LMARGIN", new_y="NEXT")
+    gray = colors.HexColor("#666666")
+    light_gray = colors.HexColor("#cccccc")
+    amber = colors.HexColor("#b07800")
+    link_color = colors.HexColor("#4444cc")
 
-    pdf.set_font("Helvetica", "", 12)
-    pdf.set_text_color(100, 100, 100)
-    meta = f"{result.get('date', '')}  •  {result.get('venue', '')}"
-    pdf.cell(0, 8, meta, new_x="LMARGIN", new_y="NEXT")
+    s_artist = _style("artist", size=22, leading=26, bold=True)
+    s_meta = _style("meta", size=11, leading=14, color=gray, space_after=4)
+    s_num = _style("num", size=10, leading=14, color=gray)
+    s_song = _style("song", size=11, leading=15)
+    s_info = _style("info", size=9, leading=12, color=gray)
+    s_encore = _style("encore", size=9, leading=12, color=amber, space_before=6, space_after=6)
+    s_url = _style("url", size=8, leading=11, color=link_color, space_before=6)
 
-    pdf.set_draw_color(200, 200, 200)
-    pdf.set_line_width(0.5)
-    pdf.ln(2)
-    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-    pdf.ln(6)
+    story = []
 
-    # ── Song list ───────────────────────────────────────────
+    story.append(Paragraph(_safe(result.get("artist", "")), s_artist))
+
+    meta = f"{result.get('date', '')}  -  {result.get('venue', '')}"
+    story.append(Paragraph(_safe(meta), s_meta))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=light_gray, spaceAfter=8))
+
     songs = result.get("songs", [])
     encore_breaks = set(result.get("encore_breaks", []))
-    pdf.set_text_color(0, 0, 0)
 
     for j, song in enumerate(songs):
         if j in encore_breaks:
-            pdf.ln(2)
-            pdf.set_font("Helvetica", "I", 9)
-            pdf.set_text_color(150, 100, 0)
-            pdf.cell(0, 6, "— Encore —", align="C", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_text_color(0, 0, 0)
-            pdf.ln(2)
+            story.append(Paragraph("— Encore —", s_encore))
 
-        pdf.set_font("Helvetica", "", 11)
-        num = f"{song['order']}."
-        name = song["name"]
-        info = f"  ({song['info']})" if song.get("info") else ""
+        # Number + name on same line using a table-like trick with tabs
+        song_line = f'<font color="#aaaaaa">{song["order"]}.</font>  {_safe(song["name"])}'
+        story.append(Paragraph(song_line, s_song))
 
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(140, 140, 140)
-        pdf.cell(10, 7, num)
+        if song.get("info"):
+            story.append(Paragraph(f'({_safe(song["info"])})', s_info))
 
-        pdf.set_font("Helvetica", "", 11)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 7, name, new_x="LMARGIN", new_y="NEXT")
-
-        if info:
-            pdf.set_font("Helvetica", "I", 9)
-            pdf.set_text_color(120, 120, 120)
-            pdf.cell(10, 5, "")
-            pdf.cell(0, 5, info.strip(), new_x="LMARGIN", new_y="NEXT")
-            pdf.set_text_color(0, 0, 0)
-
-    # ── Footer ──────────────────────────────────────────────
     url = result.get("setlist_url", "")
     if url:
-        pdf.ln(6)
-        pdf.set_draw_color(200, 200, 200)
-        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(100, 100, 200)
-        pdf.cell(0, 6, url)
+        story.append(Spacer(1, 4 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=light_gray))
+        story.append(Paragraph(_safe(url), s_url))
 
-    buf = io.BytesIO()
-    pdf.output(buf)
+    doc.build(story)
     return buf.getvalue()
 
 
 def safe_filename(artist: str, date: str) -> str:
-    """Generate a safe filename from artist and date."""
     safe = "".join(c if c.isalnum() or c in " -_" else "" for c in f"{artist} {date}")
     return safe.strip().replace(" ", "_") + ".pdf"
