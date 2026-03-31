@@ -8,9 +8,7 @@ ARTIST_KEYWORDS = {"artist"}
 DATE_KEYWORDS = {"datum", "date"}
 VENUE_KEYWORDS = {"venue", "plats", "lokal"}
 
-DATE_FORMATS = [
-    "%Y-%m-%d %H:%M:%S",  # pandas datetime-to-str: '2026-03-21 00:00:00'
-    "%Y-%m-%d",
+EXPLICIT_FORMATS = [
     "%d-%m-%Y",
     "%d/%m/%Y",
     "%d.%m.%Y",
@@ -32,12 +30,23 @@ def _parse_date(value) -> str:
     """Parse various date formats and return dd-MM-yyyy string for setlist.fm."""
     if isinstance(value, datetime):
         return value.strftime("%d-%m-%Y")
+
     s = str(value).strip()
-    for fmt in DATE_FORMATS:
+
+    # Try formats where day comes first (ambiguous otherwise)
+    for fmt in EXPLICIT_FORMATS:
         try:
             return datetime.strptime(s, fmt).strftime("%d-%m-%Y")
         except ValueError:
             continue
+
+    # Fall back to pandas which handles ISO dates, Excel serials, and
+    # datetime strings like '2026-03-21 00:00:00' or '2026-03-21 00:00:00.000000'
+    try:
+        return pd.to_datetime(s).strftime("%d-%m-%Y")
+    except Exception:
+        pass
+
     raise ValueError(f"Unrecognized date format: {value!r}")
 
 
