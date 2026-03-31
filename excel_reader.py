@@ -9,6 +9,7 @@ DATE_KEYWORDS = {"datum", "date"}
 VENUE_KEYWORDS = {"venue", "plats", "lokal"}
 
 DATE_FORMATS = [
+    "%Y-%m-%d %H:%M:%S",  # pandas datetime-to-str: '2026-03-21 00:00:00'
     "%Y-%m-%d",
     "%d-%m-%Y",
     "%d/%m/%Y",
