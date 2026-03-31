@@ -8,7 +8,7 @@ RETRY_DELAY = 2.0
 
 def _build_headers(api_key: str) -> dict:
     return {
-        "x-api-key": api_key,
+        "x-api-key": api_key.strip(),
         "Accept": "application/json",
     }
 
