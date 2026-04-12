@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  briefing:
+    build: ./briefing
+    env_file: .env
+    volumes:
+      - ./shared:/app/shared
+    restart: "no"
+
+  bot:
+    build: ./bot
+    env_file: .env
+    volumes:
+      - ./shared:/app/shared
+      - ./data:/app/data
+    restart: unless-stopped
