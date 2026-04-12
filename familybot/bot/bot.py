@@ -30,15 +30,15 @@ HELP_TEXT = """🤖 *Tillgängliga kommandon*
 /handla vara1, vara2 — Lägg till varor
 /lista — Visa hela inköpslistan
 /klar vara — Pricka av en vara
-/ångra vara — Ta tillbaka en avprickad vara
+/angra vara — Ta tillbaka en avprickad vara
 /rensa — Ta bort alla avprickade varor
 
 *Info*
-/väder — Väder för Malmö
-/väder stad — Väder för valfri stad
-/tåg — Tågstörningar Malmö–CPH och Malmö–Lund
+/vader — Väder för Malmö
+/vader stad — Väder för valfri stad
+/tag — Tågstörningar Malmö–CPH och Malmö–Lund
 /nyheter — Top 3 senaste nyheter
-/hjälp — Denna hjälp
+/hjalp — Denna hjälp
 """
 
 
@@ -69,13 +69,12 @@ def main() -> None:
     app.add_handler(CommandHandler("handla", cmd_handla))
     app.add_handler(CommandHandler("lista", cmd_lista))
     app.add_handler(CommandHandler("klar", cmd_klar))
-    # /ångra and /angra both work (Telegram normalises Swedish characters)
-    app.add_handler(CommandHandler(["ångra", "angra"], cmd_angra))
+    app.add_handler(CommandHandler("angra", cmd_angra))
     app.add_handler(CommandHandler("rensa", cmd_rensa))
-    app.add_handler(CommandHandler(["väder", "vader"], cmd_vader))
-    app.add_handler(CommandHandler(["tåg", "tag"], cmd_tag))
+    app.add_handler(CommandHandler("vader", cmd_vader))
+    app.add_handler(CommandHandler("tag", cmd_tag))
     app.add_handler(CommandHandler("nyheter", cmd_nyheter))
-    app.add_handler(CommandHandler(["hjälp", "hjalp", "help"], cmd_help))
+    app.add_handler(CommandHandler(["hjalp", "help"], cmd_help))
 
     logger.info("Bot startar med polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
