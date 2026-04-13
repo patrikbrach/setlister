@@ -1,22 +1,16 @@
-"""Trafikverket API client for train disruption messages."""
+"""Trafikverket API client for train disruption messages via TrainAnnouncement."""
 
 import requests
 
 TRAFIKVERKET_API_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json"
 
-ROUTE_MALMÖ_CPH = ["Malmö C", "Triangeln", "Hyllie", "Kastrup", "København H", "Kobenhavn H"]
-ROUTE_MALMÖ_LUND = ["Malmö C", "Triangeln", "Lund C"]
-
-ALL_RELEVANT = set(ROUTE_MALMÖ_CPH + ROUTE_MALMÖ_LUND)
+# Station signatures: M=Malmö C, Tr=Triangeln, Hi=Hyllie, Lu=Lund C
+CPH_STATIONS = {"M", "Tr", "Hi"}
+LUND_STATIONS = {"M", "Tr", "Lu"}
 
 
 def fetch_train_messages(api_key: str) -> list[dict]:
-    """Fetch all active TrainMessage objects from Trafikverket API."""
-    # Query for trains with deviations on relevant stations
-    stations = ["Malmö C", "Lund C", "Hyllie", "Triangeln"]
-    station_filter = "".join(
-        f'<EQ name="LocationSignature" value="{s}" />' for s in ["M", "Lu", "Hi", "Tr"]
-    )
+    """Fetch TrainAnnouncements with active deviations at relevant stations."""
     query = f"""<REQUEST>
   <LOGIN authenticationkey="{api_key}" />
   <QUERY objecttype="TrainAnnouncement" schemaversion="1.8" limit="100">
@@ -26,10 +20,8 @@ def fetch_train_messages(api_key: str) -> list[dict]:
         <EXISTS name="Deviation" value="true" />
       </AND>
     </FILTER>
-    <INCLUDE>AdvertisedTrainIdent</INCLUDE>
     <INCLUDE>LocationSignature</INCLUDE>
     <INCLUDE>Deviation</INCLUDE>
-    <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
   </QUERY>
 </REQUEST>"""
 
@@ -45,68 +37,41 @@ def fetch_train_messages(api_key: str) -> list[dict]:
             return []
         data = response.json()
         results = data.get("RESPONSE", {}).get("RESULT", [])
-        if results:
-            r = results[0]
-            # Print keys for debugging
-            keys = list(r.keys())
-            print(f"Trafikverket result keys: {keys}")
-            return r.get("TrainAnnouncement") or []
-        return []
+        return results[0].get("TrainAnnouncement", []) if results else []
     except Exception as e:
         print(f"Trafikverket API exception: {e}")
         return []
 
 
-def _affected_locations(message: dict) -> list[str]:
-    """Extract location names from a message."""
-    affected = message.get("AffectedLocation", [])
-    if not isinstance(affected, list):
-        affected = [affected]
-    return [loc.get("LocationName", "") for loc in affected if isinstance(loc, dict)]
-
-
-def _affects_route(message: dict, route: list[str]) -> bool:
-    names = _affected_locations(message)
-    # Check exact match or partial match (e.g. "Malmö C" in "Malmö Centralstation")
-    for name in names:
-        for station in route:
-            if station.lower() in name.lower() or name.lower() in station.lower():
-                return True
-    return False
-
-
-def _is_relevant(message: dict) -> bool:
-    """Return True if the message affects any of our monitored routes."""
-    names = _affected_locations(message)
-    for name in names:
-        for station in ALL_RELEVANT:
-            if station.lower() in name.lower() or name.lower() in station.lower():
-                return True
-    return False
-
-
 def get_disruptions(api_key: str) -> dict:
     """
     Returns a dict with keys 'malmö_cph' and 'malmö_lund'.
-    Each value is a list of disruption message strings.
+    Each value is a deduplicated list of disruption description strings.
     """
-    all_messages = fetch_train_messages(api_key)
-    result = {"malmö_cph": [], "malmö_lund": []}
+    announcements = fetch_train_messages(api_key)
+    result: dict[str, list[str]] = {"malmö_cph": [], "malmö_lund": []}
 
-    for msg in all_messages:
-        deviations = msg.get("Deviation", [])
+    seen_cph: set[str] = set()
+    seen_lund: set[str] = set()
+
+    for ann in announcements:
+        loc = ann.get("LocationSignature", "")
+        deviations = ann.get("Deviation", [])
         if not isinstance(deviations, list):
             deviations = [deviations]
-        deviation_texts = [d.get("Description", "") for d in deviations if isinstance(d, dict)]
-        text = "; ".join(t for t in deviation_texts if t) or "Avvikelse"
-        loc = msg.get("LocationSignature", "")
 
-        # M=Malmö C, Hi=Hyllie, Tr=Triangeln, Lu=Lund C
-        if loc in ("M", "Hi", "Tr"):
-            result["malmö_cph"].append(text)
-            result["malmö_lund"].append(text)
-        elif loc == "Lu":
-            result["malmö_lund"].append(text)
+        for dev in deviations:
+            if not isinstance(dev, dict):
+                continue
+            text = dev.get("Description", "").strip() or "Avvikelse"
+
+            if loc in CPH_STATIONS and text not in seen_cph:
+                result["malmö_cph"].append(text)
+                seen_cph.add(text)
+
+            if loc in LUND_STATIONS and text not in seen_lund:
+                result["malmö_lund"].append(text)
+                seen_lund.add(text)
 
     return result
 
