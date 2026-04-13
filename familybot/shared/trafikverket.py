@@ -1,38 +1,22 @@
 """Trafikverket API client for train disruption messages."""
 
-import os
 import requests
-from typing import Optional
 
 TRAFIKVERKET_API_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json"
 
-RELEVANT_STATIONS = [
-    "Malmö C",
-    "Triangeln",
-    "Hyllie",
-    "Lund C",
-    "Kastrup",
-    "København H",
-]
-
-ROUTE_MALMÖ_CPH = ["Malmö C", "Triangeln", "Hyllie", "Kastrup", "København H"]
+ROUTE_MALMÖ_CPH = ["Malmö C", "Triangeln", "Hyllie", "Kastrup", "København H", "Kobenhavn H"]
 ROUTE_MALMÖ_LUND = ["Malmö C", "Triangeln", "Lund C"]
+
+ALL_RELEVANT = set(ROUTE_MALMÖ_CPH + ROUTE_MALMÖ_LUND)
 
 
 def fetch_train_messages(api_key: str) -> list[dict]:
-    """Fetch active TrainMessage objects from Trafikverket API."""
+    """Fetch all active TrainMessage objects from Trafikverket API."""
     query = f"""<REQUEST>
   <LOGIN authenticationkey="{api_key}" />
   <QUERY objecttype="TrainMessage" schemaversion="1.6">
-    <FILTER>
-      <OR>
-        {''.join(f'<LIKE name="AffectedLocation.LocationName" value="%{s}%" />' for s in RELEVANT_STATIONS)}
-      </OR>
-    </FILTER>
     <INCLUDE>Header</INCLUDE>
     <INCLUDE>ReasonCodeText</INCLUDE>
-    <INCLUDE>StartDateTime</INCLUDE>
-    <INCLUDE>PrognosticatedEndDateTimeTrafficImpact</INCLUDE>
     <INCLUDE>AffectedLocation</INCLUDE>
     <INCLUDE>TrafficImpact</INCLUDE>
   </QUERY>
@@ -41,28 +25,49 @@ def fetch_train_messages(api_key: str) -> list[dict]:
     try:
         response = requests.post(
             TRAFIKVERKET_API_URL,
-            data=query,
-            headers={"Content-Type": "text/xml"},
+            data=query.encode("utf-8"),
+            headers={"Content-Type": "text/xml; charset=utf-8"},
             timeout=10,
         )
-        response.raise_for_status()
+        if not response.ok:
+            print(f"Trafikverket API error {response.status_code}: {response.text[:300]}")
+            return []
         data = response.json()
         results = data.get("RESPONSE", {}).get("RESULT", [])
         if results:
             return results[0].get("TrainMessage", [])
         return []
     except Exception as e:
-        print(f"Trafikverket API error: {e}")
+        print(f"Trafikverket API exception: {e}")
         return []
 
 
-def _affects_route(message: dict, route_stations: list[str]) -> bool:
-    """Check if a message affects any station on a given route."""
+def _affected_locations(message: dict) -> list[str]:
+    """Extract location names from a message."""
     affected = message.get("AffectedLocation", [])
     if not isinstance(affected, list):
         affected = [affected]
-    affected_names = [loc.get("LocationName", "") for loc in affected]
-    return any(station in affected_names for station in route_stations)
+    return [loc.get("LocationName", "") for loc in affected if isinstance(loc, dict)]
+
+
+def _affects_route(message: dict, route: list[str]) -> bool:
+    names = _affected_locations(message)
+    # Check exact match or partial match (e.g. "Malmö C" in "Malmö Centralstation")
+    for name in names:
+        for station in route:
+            if station.lower() in name.lower() or name.lower() in station.lower():
+                return True
+    return False
+
+
+def _is_relevant(message: dict) -> bool:
+    """Return True if the message affects any of our monitored routes."""
+    names = _affected_locations(message)
+    for name in names:
+        for station in ALL_RELEVANT:
+            if station.lower() in name.lower() or name.lower() in station.lower():
+                return True
+    return False
 
 
 def get_disruptions(api_key: str) -> dict:
@@ -70,10 +75,12 @@ def get_disruptions(api_key: str) -> dict:
     Returns a dict with keys 'malmö_cph' and 'malmö_lund'.
     Each value is a list of disruption message strings.
     """
-    messages = fetch_train_messages(api_key)
+    all_messages = fetch_train_messages(api_key)
     result = {"malmö_cph": [], "malmö_lund": []}
 
-    for msg in messages:
+    for msg in all_messages:
+        if not _is_relevant(msg):
+            continue
         header = msg.get("Header", "Störning utan rubrik")
         reason = msg.get("ReasonCodeText", "")
         text = header if not reason else f"{header} ({reason})"
