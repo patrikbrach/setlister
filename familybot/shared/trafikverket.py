@@ -15,10 +15,6 @@ def fetch_train_messages(api_key: str) -> list[dict]:
     query = f"""<REQUEST>
   <LOGIN authenticationkey="{api_key}" />
   <QUERY objecttype="TrainMessage" schemaversion="1.6">
-    <INCLUDE>Header</INCLUDE>
-    <INCLUDE>ReasonCodeText</INCLUDE>
-    <INCLUDE>AffectedLocation</INCLUDE>
-    <INCLUDE>TrafficImpact</INCLUDE>
   </QUERY>
 </REQUEST>"""
 
@@ -78,11 +74,21 @@ def get_disruptions(api_key: str) -> dict:
     all_messages = fetch_train_messages(api_key)
     result = {"malmö_cph": [], "malmö_lund": []}
 
+    # Debug: print first message keys so we can identify correct field names
+    if all_messages:
+        print(f"TrainMessage keys: {list(all_messages[0].keys())}")
+
     for msg in all_messages:
         if not _is_relevant(msg):
             continue
-        header = msg.get("Header", "Störning utan rubrik")
-        reason = msg.get("ReasonCodeText", "")
+        # Try common field name variants
+        header = (
+            msg.get("Header")
+            or msg.get("ExternalDescription")
+            or msg.get("Description")
+            or "Störning"
+        )
+        reason = msg.get("ReasonCodeText") or msg.get("ReasonCode") or ""
         text = header if not reason else f"{header} ({reason})"
 
         if _affects_route(msg, ROUTE_MALMÖ_CPH):
