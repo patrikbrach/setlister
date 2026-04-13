@@ -72,7 +72,7 @@ def get_telegram_chat_id(token: str) -> str:
 
 def build_message() -> str:
     date_str = format_date()
-    header = f"🌅 *God morgon Patrik! {date_str}*\n"
+    header = f"🌅 *God morgon familjen! {date_str}*\n"
 
     disruptions = get_disruptions(TRAFIKVERKET_API_KEY)
     traffic_block = format_disruptions_telegram(disruptions)
