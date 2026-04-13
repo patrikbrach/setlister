@@ -14,7 +14,7 @@ def fetch_train_messages(api_key: str) -> list[dict]:
     """Fetch all active TrainMessage objects from Trafikverket API."""
     query = f"""<REQUEST>
   <LOGIN authenticationkey="{api_key}" />
-  <QUERY objecttype="TrainMessage" schemaversion="1.6">
+  <QUERY objecttype="Situation" schemaversion="1.5">
   </QUERY>
 </REQUEST>"""
 
@@ -31,7 +31,9 @@ def fetch_train_messages(api_key: str) -> list[dict]:
         data = response.json()
         results = data.get("RESPONSE", {}).get("RESULT", [])
         if results:
-            return results[0].get("TrainMessage", [])
+            # Try both known object type names
+            r = results[0]
+            return r.get("TrainMessage") or r.get("Situation") or r.get("Message") or []
         return []
     except Exception as e:
         print(f"Trafikverket API exception: {e}")
