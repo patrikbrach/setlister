@@ -6,6 +6,7 @@ services:
     env_file: .env
     volumes:
       - ./shared:/app/shared
+      - ./google-credentials.json:/app/google-credentials.json:ro
     restart: "no"
 
   bot:
@@ -14,4 +15,5 @@ services:
     volumes:
       - ./shared:/app/shared
       - ./data:/app/data
+      - ./google-credentials.json:/app/google-credentials.json:ro
     restart: unless-stopped

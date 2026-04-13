@@ -16,12 +16,15 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENWEATHERMAP_API_KEY = os.environ["OPENWEATHERMAP_API_KEY"]
 TRAFIKVERKET_API_KEY = os.environ["TRAFIKVERKET_API_KEY"]
+GOOGLE_CALENDAR_ID = os.environ.get("GOOGLE_CALENDAR_ID", "")
+GOOGLE_CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/app/google-credentials.json")
 
 # Import shared modules (paths set above)
 from trafikverket import get_disruptions, format_disruptions_telegram  # noqa: E402
 from weather import format_weather_telegram  # noqa: E402
 from news import format_news_telegram  # noqa: E402
 from config import WEATHER_CITIES  # noqa: E402
+from calendar_client import get_todays_events  # noqa: E402
 
 SWEDISH_DAYS = [
     "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"
@@ -70,6 +73,25 @@ def get_telegram_chat_id(token: str) -> str:
     return str(updates[-1]["message"]["chat"]["id"])
 
 
+def build_calendar_block() -> str:
+    if not GOOGLE_CALENDAR_ID:
+        return ""
+    try:
+        events = get_todays_events(GOOGLE_CALENDAR_ID, GOOGLE_CREDENTIALS_FILE)
+        lines = ["📅 *IDAG*"]
+        if not events:
+            lines.append("Inga händelser idag")
+        for ev in events:
+            if ev["all_day"]:
+                lines.append(f"  Heldag: {ev['title']}")
+            else:
+                lines.append(f"  {ev['start'].strftime('%H:%M')} {ev['title']}")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"Kalender-fel: {e}")
+        return ""
+
+
 def build_message() -> str:
     date_str = format_date()
     header = f"🌅 *God morgon familjen! {date_str}*\n"
@@ -81,7 +103,12 @@ def build_message() -> str:
 
     news_block = format_news_telegram(max_items=3)
 
-    return "\n\n".join([header, traffic_block, weather_block, news_block])
+    calendar_block = build_calendar_block()
+
+    blocks = [header, traffic_block, weather_block, news_block]
+    if calendar_block:
+        blocks.append(calendar_block)
+    return "\n\n".join(blocks)
 
 
 def main() -> None:
