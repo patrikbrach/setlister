@@ -8,6 +8,13 @@ TRAFIKVERKET_API_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json"
 CPH_STATIONS = {"M", "Tr", "Hi"}
 LUND_STATIONS = {"M", "Tr", "Lu"}
 
+# Deviation descriptions considered serious enough to surface
+SERIOUS_DEVIATIONS = {
+    "Inställt", "Växelfel", "Signalfel", "Spårfel", "Fordonsfel",
+    "Banarbete", "Polisinsats", "Djur i spår", "Obeh. i spår",
+    "Tågkö", "Banhinder", "Brist på fordon",
+}
+
 
 def fetch_train_messages(api_key: str) -> list[dict]:
     """Fetch TrainAnnouncements with active deviations at relevant stations."""
@@ -46,13 +53,11 @@ def fetch_train_messages(api_key: str) -> list[dict]:
 def get_disruptions(api_key: str) -> dict:
     """
     Returns a dict with keys 'malmö_cph' and 'malmö_lund'.
-    Each value is a deduplicated list of disruption description strings.
+    Each value is a dict: {'count': int, 'reasons': list[str]}
     """
     announcements = fetch_train_messages(api_key)
-    result: dict[str, list[str]] = {"malmö_cph": [], "malmö_lund": []}
-
-    seen_cph: set[str] = set()
-    seen_lund: set[str] = set()
+    cph = {"count": 0, "reasons": set()}
+    lund = {"count": 0, "reasons": set()}
 
     for ann in announcements:
         loc = ann.get("LocationSignature", "")
@@ -60,37 +65,37 @@ def get_disruptions(api_key: str) -> dict:
         if not isinstance(deviations, list):
             deviations = [deviations]
 
-        for dev in deviations:
-            if not isinstance(dev, dict):
-                continue
-            text = dev.get("Description", "").strip() or "Avvikelse"
+        serious = {
+            dev.get("Description", "").strip()
+            for dev in deviations
+            if isinstance(dev, dict) and dev.get("Description", "").strip() in SERIOUS_DEVIATIONS
+        }
 
-            if loc in CPH_STATIONS and text not in seen_cph:
-                result["malmö_cph"].append(text)
-                seen_cph.add(text)
+        if loc in CPH_STATIONS:
+            cph["count"] += 1
+            cph["reasons"] |= serious
+        if loc in LUND_STATIONS:
+            lund["count"] += 1
+            lund["reasons"] |= serious
 
-            if loc in LUND_STATIONS and text not in seen_lund:
-                result["malmö_lund"].append(text)
-                seen_lund.add(text)
+    return {
+        "malmö_cph": {"count": cph["count"], "reasons": sorted(cph["reasons"])},
+        "malmö_lund": {"count": lund["count"], "reasons": sorted(lund["reasons"])},
+    }
 
-    return result
+
+def _format_route(data: dict) -> str:
+    count = data.get("count", 0)
+    reasons = data.get("reasons", [])
+    if count == 0:
+        return "✅ Inga störningar"
+    reason_str = f" ({', '.join(reasons)})" if reasons else ""
+    return f"⚠️ {count} tåg påverkade{reason_str}"
 
 
 def format_disruptions_telegram(disruptions: dict) -> str:
     """Format disruptions for Telegram message."""
     lines = ["🚂 *TÅGSTÖRNINGAR*"]
-
-    cph = disruptions.get("malmö_cph", [])
-    lund = disruptions.get("malmö_lund", [])
-
-    if cph:
-        lines.append("Malmö → Köpenhamn: ⚠️ " + "; ".join(cph))
-    else:
-        lines.append("Malmö → Köpenhamn: ✅ Inga störningar")
-
-    if lund:
-        lines.append("Malmö → Lund: ⚠️ " + "; ".join(lund))
-    else:
-        lines.append("Malmö → Lund: ✅ Inga störningar")
-
+    lines.append("Malmö → Köpenhamn: " + _format_route(disruptions.get("malmö_cph", {})))
+    lines.append("Malmö → Lund: " + _format_route(disruptions.get("malmö_lund", {})))
     return "\n".join(lines)
