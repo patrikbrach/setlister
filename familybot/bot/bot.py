@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from handlers.shopping import cmd_handla, cmd_lista, cmd_klar, cmd_angra, cmd_rensa
+from handlers.shopping import cmd_handla, cmd_lista, cmd_klar, cmd_angra, cmd_rensa, cmd_raderalista
 from handlers.weather import cmd_vader
 from handlers.traffic import cmd_tag
 from handlers.news import cmd_nyheter
@@ -32,6 +32,7 @@ HELP_TEXT = """🤖 *Tillgängliga kommandon*
 /klar vara — Pricka av en vara
 /angra vara — Ta tillbaka en avprickad vara
 /rensa — Ta bort alla avprickade varor
+/raderalista — Radera hela listan
 
 *Info*
 /vader — Väder för Malmö
@@ -53,6 +54,7 @@ async def post_init(application: Application) -> None:
         BotCommand("klar", "Pricka av en vara"),
         BotCommand("angra", "Ta tillbaka en avprickad vara"),
         BotCommand("rensa", "Ta bort avprickade varor"),
+        BotCommand("raderalista", "Radera hela inköpslistan"),
         BotCommand("vader", "Visa väder"),
         BotCommand("tag", "Visa tågstörningar"),
         BotCommand("nyheter", "Visa senaste nyheter"),
@@ -71,6 +73,7 @@ def main() -> None:
     app.add_handler(CommandHandler("klar", cmd_klar))
     app.add_handler(CommandHandler("angra", cmd_angra))
     app.add_handler(CommandHandler("rensa", cmd_rensa))
+    app.add_handler(CommandHandler("raderalista", cmd_raderalista))
     app.add_handler(CommandHandler("vader", cmd_vader))
     app.add_handler(CommandHandler("tag", cmd_tag))
     app.add_handler(CommandHandler("nyheter", cmd_nyheter))

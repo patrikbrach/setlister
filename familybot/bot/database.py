@@ -86,3 +86,11 @@ def delete_completed() -> int:
         cursor = conn.execute("DELETE FROM shopping_list WHERE completed=1")
         conn.commit()
         return cursor.rowcount
+
+
+def delete_all() -> int:
+    """Delete every item in the list. Returns number of deleted rows."""
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM shopping_list")
+        conn.commit()
+        return cursor.rowcount

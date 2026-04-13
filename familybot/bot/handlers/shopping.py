@@ -93,3 +93,12 @@ async def cmd_rensa(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"🗑️ Tog bort {count} avprickad(e) vara(or).")
     else:
         await update.message.reply_text("Inga avprickade varor att rensa.")
+
+
+async def cmd_raderalista(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/raderalista — raderar hela inköpslistan"""
+    count = db.delete_all()
+    if count:
+        await update.message.reply_text(f"🗑️ Hela listan raderad ({count} varor borttagna).")
+    else:
+        await update.message.reply_text("Listan var redan tom.")
