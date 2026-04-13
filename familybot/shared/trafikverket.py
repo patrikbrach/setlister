@@ -12,9 +12,24 @@ ALL_RELEVANT = set(ROUTE_MALMÖ_CPH + ROUTE_MALMÖ_LUND)
 
 def fetch_train_messages(api_key: str) -> list[dict]:
     """Fetch all active TrainMessage objects from Trafikverket API."""
+    # Query for trains with deviations on relevant stations
+    stations = ["Malmö C", "Lund C", "Hyllie", "Triangeln"]
+    station_filter = "".join(
+        f'<EQ name="LocationSignature" value="{s}" />' for s in ["M", "Lu", "Hi", "Tr"]
+    )
     query = f"""<REQUEST>
   <LOGIN authenticationkey="{api_key}" />
-  <QUERY objecttype="Situation" schemaversion="1.5">
+  <QUERY objecttype="TrainAnnouncement" schemaversion="1.8" limit="100">
+    <FILTER>
+      <AND>
+        <IN name="LocationSignature" value="M,Lu,Hi,Tr" />
+        <EXISTS name="Deviation" value="true" />
+      </AND>
+    </FILTER>
+    <INCLUDE>AdvertisedTrainIdent</INCLUDE>
+    <INCLUDE>LocationSignature</INCLUDE>
+    <INCLUDE>Deviation</INCLUDE>
+    <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
   </QUERY>
 </REQUEST>"""
 
@@ -31,9 +46,11 @@ def fetch_train_messages(api_key: str) -> list[dict]:
         data = response.json()
         results = data.get("RESPONSE", {}).get("RESULT", [])
         if results:
-            # Try both known object type names
             r = results[0]
-            return r.get("TrainMessage") or r.get("Situation") or r.get("Message") or []
+            # Print keys for debugging
+            keys = list(r.keys())
+            print(f"Trafikverket result keys: {keys}")
+            return r.get("TrainAnnouncement") or []
         return []
     except Exception as e:
         print(f"Trafikverket API exception: {e}")
@@ -76,26 +93,19 @@ def get_disruptions(api_key: str) -> dict:
     all_messages = fetch_train_messages(api_key)
     result = {"malmö_cph": [], "malmö_lund": []}
 
-    # Debug: print first message keys so we can identify correct field names
-    if all_messages:
-        print(f"TrainMessage keys: {list(all_messages[0].keys())}")
-
     for msg in all_messages:
-        if not _is_relevant(msg):
-            continue
-        # Try common field name variants
-        header = (
-            msg.get("Header")
-            or msg.get("ExternalDescription")
-            or msg.get("Description")
-            or "Störning"
-        )
-        reason = msg.get("ReasonCodeText") or msg.get("ReasonCode") or ""
-        text = header if not reason else f"{header} ({reason})"
+        deviations = msg.get("Deviation", [])
+        if not isinstance(deviations, list):
+            deviations = [deviations]
+        deviation_texts = [d.get("Description", "") for d in deviations if isinstance(d, dict)]
+        text = "; ".join(t for t in deviation_texts if t) or "Avvikelse"
+        loc = msg.get("LocationSignature", "")
 
-        if _affects_route(msg, ROUTE_MALMÖ_CPH):
+        # M=Malmö C, Hi=Hyllie, Tr=Triangeln, Lu=Lund C
+        if loc in ("M", "Hi", "Tr"):
             result["malmö_cph"].append(text)
-        if _affects_route(msg, ROUTE_MALMÖ_LUND):
+            result["malmö_lund"].append(text)
+        elif loc == "Lu":
             result["malmö_lund"].append(text)
 
     return result
