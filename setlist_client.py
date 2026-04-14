@@ -1,5 +1,7 @@
+import asyncio
 import time
 import requests
+import httpx
 
 BASE_URL = "https://api.setlist.fm/rest/1.0"
 MAX_RETRIES = 3
@@ -92,6 +94,59 @@ def fetch_setlist_sync(
         except requests.RequestException as e:
             if attempt < MAX_RETRIES:
                 time.sleep(RETRY_DELAY * attempt)
+                continue
+            return {"id": row_id, "status": "error", "message": f"Nätverksfel: {e}", "artist": artist, "date": date}
+
+    return {"id": row_id, "status": "error", "message": "Max antal försök uppnått", "artist": artist, "date": date}
+
+
+async def fetch_setlist(
+    client: httpx.AsyncClient,
+    api_key: str,
+    row_id: int,
+    artist: str,
+    date: str,
+    venue: str | None = None,
+) -> dict:
+    params = {"artistName": artist, "date": date, "p": 1}
+    if venue:
+        params["venueName"] = venue
+
+    headers = _build_headers(api_key)
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = await client.get(
+                f"{BASE_URL}/search/setlists",
+                params=params,
+                headers=headers,
+                timeout=15,
+            )
+
+            if resp.status_code == 200:
+                setlists = resp.json().get("setlist", [])
+                if not setlists:
+                    return {"id": row_id, "status": "not_found", "artist": artist, "date": date, "venue": venue or ""}
+                return _parse_setlist(setlists[0], row_id)
+
+            elif resp.status_code == 404:
+                return {"id": row_id, "status": "not_found", "artist": artist, "date": date, "venue": venue or ""}
+
+            elif resp.status_code == 401:
+                return {"id": row_id, "status": "error", "message": "Ogiltig API-nyckel (401)", "artist": artist, "date": date}
+
+            elif resp.status_code == 429:
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY * attempt)
+                    continue
+                return {"id": row_id, "status": "error", "message": "Rate limit – försök igen senare", "artist": artist, "date": date}
+
+            else:
+                return {"id": row_id, "status": "error", "message": f"HTTP {resp.status_code}", "artist": artist, "date": date}
+
+        except httpx.RequestError as e:
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(RETRY_DELAY * attempt)
                 continue
             return {"id": row_id, "status": "error", "message": f"Nätverksfel: {e}", "artist": artist, "date": date}
 

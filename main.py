@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import os
 import webbrowser
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -13,6 +14,9 @@ from fastapi.staticfiles import StaticFiles
 
 from excel_reader import parse_excel
 from setlist_client import fetch_setlist
+
+# API key pre-configured via environment variable (optional)
+_BAKED_API_KEY = os.getenv("SETLIST_API_KEY", "").strip()
 
 # In-memory row storage keyed by upload session
 _rows: dict[int, dict] = {}
@@ -33,12 +37,22 @@ async def index():
     return FileResponse("static/index.html")
 
 
+@app.get("/config")
+async def config():
+    """Tell the frontend whether an API key is pre-configured on the server."""
+    return {"api_key_baked": bool(_BAKED_API_KEY)}
+
+
 @app.post("/upload")
 async def upload(
     file: UploadFile = File(...),
-    api_key: str = Form(...),
+    api_key: str = Form(default=""),
 ):
     """Parse uploaded xlsx and return list of rows."""
+    effective_key = api_key.strip() or _BAKED_API_KEY
+    if not effective_key:
+        raise HTTPException(status_code=400, detail="Ingen API-nyckel angiven.")
+
     if not file.filename or not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Endast .xlsx-filer stöds.")
 
@@ -59,9 +73,13 @@ async def upload(
 @app.get("/fetch/{row_id}")
 async def fetch_row(
     row_id: int,
-    api_key: str = Query(...),
+    api_key: str = Query(default=""),
 ):
     """Fetch setlist for a single row by id."""
+    effective_key = api_key.strip() or _BAKED_API_KEY
+    if not effective_key:
+        raise HTTPException(status_code=400, detail="Ingen API-nyckel angiven.")
+
     if row_id not in _rows:
         raise HTTPException(status_code=404, detail="Okänt rad-id.")
 
@@ -69,7 +87,7 @@ async def fetch_row(
     async with httpx.AsyncClient() as client:
         result = await fetch_setlist(
             client=client,
-            api_key=api_key,
+            api_key=effective_key,
             row_id=row_id,
             artist=row["artist"],
             date=row["date"],

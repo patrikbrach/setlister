@@ -5,9 +5,11 @@
   let totalRows = 0;
   let doneCount = 0;
   let aborted = false;
+  let apiBaked = false;
 
   // ── DOM refs ────────────────────────────────────────────
   const apiKeyInput  = document.getElementById("api-key");
+  const apiKeyWrap   = document.querySelector(".api-key-wrap");
   const uploadZone   = document.getElementById("upload-zone");
   const fileInput    = document.getElementById("file-input");
   const fileNameEl   = document.getElementById("file-name");
@@ -18,6 +20,17 @@
   const resultsList  = document.getElementById("results");
   const exportBtn    = document.getElementById("export-btn");
   const errorBanner  = document.getElementById("error-banner");
+
+  // ── Init: check if API key is pre-configured on server ──
+  fetch("/config")
+    .then(r => r.json())
+    .then(cfg => {
+      apiBaked = cfg.api_key_baked;
+      if (apiBaked) {
+        apiKeyWrap.style.display = "none";
+      }
+    })
+    .catch(() => {}); // ignore if /config fails
 
   // ── File drag & drop ────────────────────────────────────
   uploadZone.addEventListener("click", () => fileInput.click());
@@ -42,8 +55,8 @@
   runBtn.addEventListener("click", startLookup);
 
   async function startLookup() {
-    const apiKey = apiKeyInput.value.trim();
-    if (!apiKey) { showError("Ange en API-nyckel."); return; }
+    const apiKey = apiBaked ? "" : apiKeyInput.value.trim();
+    if (!apiBaked && !apiKey) { showError("Ange en API-nyckel."); return; }
     if (!uploadedFile) { showError("Välj en Excel-fil (.xlsx)."); return; }
 
     hideError();
