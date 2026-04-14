@@ -14,6 +14,7 @@ from telegram import Update, BotCommand, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from handlers.shopping import cmd_handla, cmd_lista, cmd_klar, cmd_angra, cmd_rensa, cmd_raderalista
+from handlers.todo import cmd_todo
 from handlers.weather import cmd_vader
 from handlers.traffic import cmd_tag
 from handlers.news import cmd_nyheter
@@ -32,6 +33,12 @@ logger = logging.getLogger(__name__)
 TZ = ZoneInfo("Europe/Stockholm")
 
 HELP_TEXT = """🤖 *Tillgängliga kommandon*
+
+*To-do*
+/todo <uppgift> — Lägg till uppgift
+/todo klar <nr> — Stryk av uppgift
+/todo lista — Visa listan
+/todo rensa — Ta bort klara
 
 *Inköpslista*
 /handla vara1, vara2 — Lägg till varor
@@ -63,6 +70,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def post_init(application: Application) -> None:
     await application.bot.set_my_commands([
+        BotCommand("todo", "Hantera to-do-listan"),
         BotCommand("handla", "Lägg till varor på inköpslistan"),
         BotCommand("lista", "Visa inköpslistan"),
         BotCommand("klar", "Pricka av en vara"),
@@ -127,6 +135,9 @@ def main() -> None:
 
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     app = Application.builder().token(token).post_init(post_init).build()
+
+    # Todo handler
+    app.add_handler(CommandHandler("todo", cmd_todo))
 
     # Shopping handlers
     app.add_handler(CommandHandler("handla", cmd_handla))
