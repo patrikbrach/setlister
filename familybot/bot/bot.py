@@ -32,6 +32,25 @@ logger = logging.getLogger(__name__)
 
 TZ = ZoneInfo("Europe/Stockholm")
 
+# --- Whitelist: only respond to these chat IDs ---
+_ALLOWED_CHATS: set[int] = set()
+
+def _load_allowed_chats() -> None:
+    raw = os.environ.get("ALLOWED_CHAT_IDS", os.environ.get("TELEGRAM_CHAT_ID", ""))
+    for part in raw.replace(",", " ").split():
+        try:
+            _ALLOWED_CHATS.add(int(part))
+        except ValueError:
+            pass
+
+async def whitelist_filter(update: Update, context) -> bool:
+    """Return True (and silently drop) if chat is not whitelisted."""
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if chat_id not in _ALLOWED_CHATS:
+        logger.debug(f"Ignored message from unauthorized chat {chat_id}")
+        return False
+    return True
+
 HELP_TEXT = """🤖 *Tillgängliga kommandon*
 
 *To-do*
@@ -132,9 +151,26 @@ async def reminder_job(context) -> None:
 
 def main() -> None:
     db.init_db()
+    _load_allowed_chats()
+    logger.info(f"Whitelisted chats: {_ALLOWED_CHATS}")
 
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     app = Application.builder().token(token).post_init(post_init).build()
+
+    # Global whitelist check — drop all updates from unknown chats
+    from telegram.ext import TypeHandler
+    async def _drop_unknown(update: Update, context) -> None:
+        pass
+    app.add_handler(TypeHandler(Update, _drop_unknown), group=-1)
+
+    # Monkey-patch: wrap process_update to enforce whitelist
+    _orig_process = app.process_update
+    async def _guarded_process(update: Update) -> None:
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if chat_id not in _ALLOWED_CHATS:
+            return
+        await _orig_process(update)
+    app.process_update = _guarded_process
 
     # Todo handler
     app.add_handler(CommandHandler("todo", cmd_todo))
