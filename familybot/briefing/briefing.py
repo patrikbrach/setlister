@@ -22,7 +22,6 @@ GOOGLE_CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/app/google
 # Import shared modules (paths set above)
 from trafikverket import get_disruptions, format_disruptions_telegram  # noqa: E402
 from weather import format_weather_telegram  # noqa: E402
-from electricity import format_price_telegram  # noqa: E402
 from config import WEATHER_CITIES  # noqa: E402
 from calendar_client import get_todays_events  # noqa: E402
 
@@ -105,9 +104,7 @@ def build_message() -> str:
 
     calendar_block = build_calendar_block()
 
-    electricity_block = format_price_telegram()
-
-    blocks = [header, traffic_block, weather_block, electricity_block]
+    blocks = [header, traffic_block, weather_block]
     if calendar_block:
         blocks.append(calendar_block)
     return "\n\n".join(blocks)
