@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Morning briefing: fetches train info, weather and news, then sends to Telegram."""
+"""Morning briefing: fetches train info, weather and calendar, then sends to Telegram."""
 
 import os
 import sys
@@ -24,6 +24,7 @@ from trafikverket import get_disruptions, format_disruptions_telegram  # noqa: E
 from weather import format_weather_telegram  # noqa: E402
 from config import WEATHER_CITIES  # noqa: E402
 from calendar_client import get_todays_events  # noqa: E402
+
 
 SWEDISH_DAYS = [
     "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"
@@ -99,8 +100,6 @@ def build_message() -> str:
     traffic_block = format_disruptions_telegram(disruptions)
 
     weather_block = format_weather_telegram(WEATHER_CITIES, OPENWEATHERMAP_API_KEY)
-
-    news_block = format_news_telegram(max_items=3)
 
     calendar_block = build_calendar_block()
 
