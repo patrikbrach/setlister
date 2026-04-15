@@ -1,0 +1,11 @@
+[Unit]
+Description=ngrok tunnel for setlister
+After=network.target setlister.service
+
+[Service]
+ExecStart=/usr/local/bin/ngrok http --url=rarity-freebase-saggy.ngrok-free.dev 8000
+Restart=on-failure
+User=patrikbrach
+
+[Install]
+WantedBy=multi-user.target
