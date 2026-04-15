@@ -18,6 +18,7 @@ from handlers.todo import cmd_todo
 from handlers.weather import cmd_vader
 from handlers.traffic import cmd_tag
 from handlers.news import cmd_nyheter
+from handlers.electricity import cmd_elpris
 from handlers.calendar import (
     cmd_idag, cmd_imorgon, cmd_vecka, cmd_boka, cmd_avboka, cmd_ja, cmd_nej
 )
@@ -75,6 +76,7 @@ HELP_TEXT = """🤖 *Tillgängliga kommandon*
 /avboka titel — Avboka händelse
 
 *Info*
+/elpris — Dagens och morgondagens elpriser
 /vader — Väder för Malmö
 /vader stad — Väder för valfri stad
 /tag — Tågstörningar Malmö–CPH och Malmö–Lund
@@ -101,6 +103,7 @@ async def post_init(application: Application) -> None:
         BotCommand("vecka", "Veckans kalenderhändelser"),
         BotCommand("boka", "Boka en händelse"),
         BotCommand("avboka", "Avboka en händelse"),
+        BotCommand("elpris", "Dagens och morgondagens elpriser"),
         BotCommand("vader", "Visa väder"),
         BotCommand("tag", "Visa tågstörningar"),
         BotCommand("nyheter", "Visa senaste nyheter"),
@@ -193,6 +196,7 @@ def main() -> None:
     app.add_handler(CommandHandler("nej", cmd_nej))
 
     # Info handlers
+    app.add_handler(CommandHandler("elpris", cmd_elpris))
     app.add_handler(CommandHandler("vader", cmd_vader))
     app.add_handler(CommandHandler("tag", cmd_tag))
     app.add_handler(CommandHandler("nyheter", cmd_nyheter))
