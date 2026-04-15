@@ -8,11 +8,10 @@ TRAFIKVERKET_API_URL = "https://api.trafikinfo.trafikverket.se/v2/data.json"
 CPH_STATIONS = {"M", "Tr", "Hi"}
 LUND_STATIONS = {"M", "Tr", "Lu"}
 
-# Deviation descriptions considered serious enough to surface
+# Only truly critical infrastructure/operational issues
 SERIOUS_DEVIATIONS = {
     "Inställt", "Växelfel", "Signalfel", "Spårfel", "Fordonsfel",
-    "Banarbete", "Polisinsats", "Djur i spår", "Obeh. i spår",
-    "Tågkö", "Banhinder", "Brist på fordon",
+    "Banhinder", "Brist på fordon", "Polisinsats",
 }
 
 
@@ -53,11 +52,11 @@ def fetch_train_messages(api_key: str) -> list[dict]:
 def get_disruptions(api_key: str) -> dict:
     """
     Returns a dict with keys 'malmö_cph' and 'malmö_lund'.
-    Each value is a dict: {'count': int, 'reasons': list[str]}
+    Each value is a sorted list of unique serious disruption reasons.
     """
     announcements = fetch_train_messages(api_key)
-    cph = {"count": 0, "reasons": set()}
-    lund = {"count": 0, "reasons": set()}
+    cph_reasons: set[str] = set()
+    lund_reasons: set[str] = set()
 
     for ann in announcements:
         loc = ann.get("LocationSignature", "")
@@ -72,30 +71,25 @@ def get_disruptions(api_key: str) -> dict:
         }
 
         if loc in CPH_STATIONS:
-            cph["count"] += 1
-            cph["reasons"] |= serious
+            cph_reasons |= serious
         if loc in LUND_STATIONS:
-            lund["count"] += 1
-            lund["reasons"] |= serious
+            lund_reasons |= serious
 
     return {
-        "malmö_cph": {"count": cph["count"], "reasons": sorted(cph["reasons"])},
-        "malmö_lund": {"count": lund["count"], "reasons": sorted(lund["reasons"])},
+        "malmö_cph": sorted(cph_reasons),
+        "malmö_lund": sorted(lund_reasons),
     }
 
 
-def _format_route(data: dict) -> str:
-    count = data.get("count", 0)
-    reasons = data.get("reasons", [])
-    if count == 0:
+def _format_route(reasons: list) -> str:
+    if not reasons:
         return "✅ Inga störningar"
-    reason_str = f" ({', '.join(reasons)})" if reasons else ""
-    return f"⚠️ {count} tåg påverkade{reason_str}"
+    return "⚠️ " + ", ".join(reasons)
 
 
 def format_disruptions_telegram(disruptions: dict) -> str:
     """Format disruptions for Telegram message."""
     lines = ["🚂 *TÅGSTÖRNINGAR*"]
-    lines.append("Malmö → Köpenhamn: " + _format_route(disruptions.get("malmö_cph", {})))
-    lines.append("Malmö → Lund: " + _format_route(disruptions.get("malmö_lund", {})))
+    lines.append("Malmö → Köpenhamn: " + _format_route(disruptions.get("malmö_cph", [])))
+    lines.append("Malmö → Lund: " + _format_route(disruptions.get("malmö_lund", [])))
     return "\n".join(lines)
