@@ -1,39 +1,61 @@
-"""Electricity spot price client using elprisetjust.se (free, no API key)."""
+"""Electricity spot price client using energidataservice.dk (free, no API key)."""
 
 import datetime
 import requests
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Europe/Stockholm")
-BASE_URL = "https://www.elprisetjust.se/api/v1/prices"
+PRICES_URL = "https://api.energidataservice.dk/dataset/Elspotprices"
+FX_URL = "https://open.er-api.com/v6/latest/EUR"
+
+
+def _get_eur_sek() -> float:
+    """Fetch current EUR/SEK exchange rate. Returns fallback 11.5 on failure."""
+    try:
+        r = requests.get(FX_URL, timeout=5)
+        r.raise_for_status()
+        return r.json()["rates"]["SEK"]
+    except Exception:
+        return 11.5  # fallback approximation
 
 
 def fetch_prices(date: datetime.date, zone: str = "SE4") -> list[dict]:
-    """Fetch hourly spot prices for a given date and price zone."""
-    url = f"{BASE_URL}/{date.year}/{date.month:02d}-{date.day:02d}_{zone}.json"
+    """Fetch hourly spot prices for a given date. Returns list of {hour, ore_per_kwh}."""
+    # Query a 26-hour window to ensure we cover the full day regardless of UTC offset
+    start = datetime.datetime(date.year, date.month, date.day, 0, 0,
+                              tzinfo=TZ).astimezone(datetime.timezone.utc)
+    end = start + datetime.timedelta(hours=26)
+
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return response.json()
+        params = {
+            "start": start.strftime("%Y-%m-%dT%H:%M"),
+            "end": end.strftime("%Y-%m-%dT%H:%M"),
+            "filter": f'{{"PriceArea":"{zone}"}}',
+            "sort": "HourUTC asc",
+            "limit": 30,
+        }
+        r = requests.get(PRICES_URL, params=params, timeout=10)
+        r.raise_for_status()
+        records = r.json().get("records", [])
     except Exception as e:
         print(f"Elpris API error: {e}")
         return []
 
+    eur_sek = _get_eur_sek()
+    result = []
+    for rec in records:
+        hour_dk = rec.get("HourDK", "")
+        if not hour_dk.startswith(date.isoformat()):
+            continue
+        eur_mwh = rec.get("SpotPriceEUR", 0)
+        ore_kwh = round(eur_mwh / 1000 * eur_sek * 100)
+        hour = int(hour_dk[11:13])
+        result.append({"hour": hour, "ore": ore_kwh})
 
-def _ore(sek_per_kwh: float) -> int:
-    """Convert SEK/kWh to öre/kWh."""
-    return round(sek_per_kwh * 100)
+    return sorted(result, key=lambda x: x["hour"])
 
 
 def get_price_summary(zone: str = "SE4") -> dict:
-    """
-    Returns a summary dict for today and tomorrow:
-    {
-        'today': {'avg': int, 'min': int, 'max': int, 'now': int, 'cheap_hours': [int], 'expensive_hours': [int]},
-        'tomorrow': {...} or None
-    }
-    All prices in öre/kWh.
-    """
     today = datetime.date.today()
     tomorrow = today + datetime.timedelta(days=1)
     now_hour = datetime.datetime.now(tz=TZ).hour
@@ -41,69 +63,68 @@ def get_price_summary(zone: str = "SE4") -> dict:
     def summarise(prices: list[dict], current_hour: int | None = None) -> dict | None:
         if not prices:
             return None
-        sek_prices = [p["SEK_per_kWh"] for p in prices]
-        ore_prices = [_ore(p) for p in sek_prices]
-        avg = round(sum(ore_prices) / len(ore_prices))
-        sorted_prices = sorted(ore_prices)
-        low_threshold = sorted_prices[len(sorted_prices) // 3]
-        high_threshold = sorted_prices[-(len(sorted_prices) // 3)]
-        cheap = [i for i, p in enumerate(ore_prices) if p <= low_threshold]
-        expensive = [i for i, p in enumerate(ore_prices) if p >= high_threshold]
-        result = {
+        ore_list = [p["ore"] for p in prices]
+        avg = round(sum(ore_list) / len(ore_list))
+        sorted_ore = sorted(ore_list)
+        n = max(1, len(sorted_ore) // 3)
+        low_thresh = sorted_ore[n - 1]
+        high_thresh = sorted_ore[-n]
+        cheap = [p["hour"] for p in prices if p["ore"] <= low_thresh]
+        expensive = [p["hour"] for p in prices if p["ore"] >= high_thresh]
+        out = {
             "avg": avg,
-            "min": min(ore_prices),
-            "max": max(ore_prices),
+            "min": min(ore_list),
+            "max": max(ore_list),
             "cheap_hours": cheap,
             "expensive_hours": expensive,
         }
-        if current_hour is not None and current_hour < len(ore_prices):
-            result["now"] = ore_prices[current_hour]
-        return result
-
-    today_prices = fetch_prices(today, zone)
-    tomorrow_prices = fetch_prices(tomorrow, zone)
+        if current_hour is not None:
+            match = [p for p in prices if p["hour"] == current_hour]
+            if match:
+                out["now"] = match[0]["ore"]
+        return out
 
     return {
-        "today": summarise(today_prices, now_hour),
-        "tomorrow": summarise(tomorrow_prices),
+        "today": summarise(fetch_prices(today, zone), now_hour),
+        "tomorrow": summarise(fetch_prices(tomorrow, zone)),
     }
 
 
+def _fmt_hours(hours: list[int]) -> str:
+    if not hours:
+        return "–"
+    groups, start, end = [], hours[0], hours[0]
+    for h in hours[1:]:
+        if h == end + 1:
+            end = h
+        else:
+            groups.append(f"{start:02d}-{end+1:02d}")
+            start = end = h
+    groups.append(f"{start:02d}-{end+1:02d}")
+    return ", ".join(groups)
+
+
 def format_price_telegram(zone: str = "SE4") -> str:
-    """Format electricity prices for Telegram."""
     summary = get_price_summary(zone)
     today = summary.get("today")
 
     if not today:
         return "⚡ *ELPRIS*\nKunde inte hämta elpris just nu."
 
-    def fmt_hours(hours: list[int]) -> str:
-        if not hours:
-            return "–"
-        # Group consecutive hours
-        groups = []
-        start = hours[0]
-        end = hours[0]
-        for h in hours[1:]:
-            if h == end + 1:
-                end = h
-            else:
-                groups.append(f"{start:02d}-{end+1:02d}")
-                start = end = h
-        groups.append(f"{start:02d}-{end+1:02d}")
-        return ", ".join(groups)
-
-    lines = ["⚡ *ELPRIS* (öre/kWh inkl. moms)"]
-
     now_str = f" | Nu: *{today['now']}*" if "now" in today else ""
-    lines.append(f"Idag: snitt {today['avg']}, min {today['min']}, max {today['max']}{now_str}")
-    lines.append(f"  🟢 Billig: {fmt_hours(today['cheap_hours'])}")
-    lines.append(f"  🔴 Dyr:    {fmt_hours(today['expensive_hours'])}")
+    lines = [
+        "⚡ *ELPRIS* (öre/kWh spotpris)",
+        f"Idag: snitt {today['avg']}, min {today['min']}, max {today['max']}{now_str}",
+        f"  🟢 Billig: {_fmt_hours(today['cheap_hours'])}",
+        f"  🔴 Dyr:    {_fmt_hours(today['expensive_hours'])}",
+    ]
 
     tomorrow = summary.get("tomorrow")
     if tomorrow:
-        lines.append(f"Imorgon: snitt {tomorrow['avg']}, min {tomorrow['min']}, max {tomorrow['max']}")
-        lines.append(f"  🟢 Billig: {fmt_hours(tomorrow['cheap_hours'])}")
-        lines.append(f"  🔴 Dyr:    {fmt_hours(tomorrow['expensive_hours'])}")
+        lines += [
+            f"Imorgon: snitt {tomorrow['avg']}, min {tomorrow['min']}, max {tomorrow['max']}",
+            f"  🟢 Billig: {_fmt_hours(tomorrow['cheap_hours'])}",
+            f"  🔴 Dyr:    {_fmt_hours(tomorrow['expensive_hours'])}",
+        ]
 
     return "\n".join(lines)
