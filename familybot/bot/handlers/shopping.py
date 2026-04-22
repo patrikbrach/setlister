@@ -39,39 +39,42 @@ async def cmd_handla(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cmd_lista(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/lista — visa hela inköpslistan"""
     rows = db.get_all_items()
-    if not rows:
+    active = [r for r in rows if not r["completed"]]
+    if not active:
         await update.message.reply_text("Inköpslistan är tom!")
         return
 
-    active = [r for r in rows if not r["completed"]]
-    done = [r for r in rows if r["completed"]]
-
     lines = ["🛒 *Inköpslista*"]
-    if active:
-        lines.append("\n*Att köpa:*")
-        for r in active:
-            date_str = str(r["added_at"])[:10]
-            lines.append(f"  ⬜ {r['item']} _(tillagd {date_str} av {r['added_by']})_")
-    if done:
-        lines.append("\n*Klara:*")
-        for r in done:
-            date_str = str(r["completed_at"])[:10] if r["completed_at"] else "?"
-            lines.append(f"  ✅ ~{r['item']}~ _(klar {date_str} av {r['completed_by']})_")
+    for i, r in enumerate(active, 1):
+        lines.append(f"{i}. {r['item']}")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def cmd_klar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/klar vara — pricka av en vara"""
+    """/klar 1,2,3 — radera varor med nummer"""
     if not context.args:
-        await update.message.reply_text("Användning: /klar vara")
+        await update.message.reply_text("Användning: /klar 1,2,3")
         return
-    item = " ".join(context.args)
-    who = _display_name(update.effective_user)
-    if db.complete_item(item, who):
-        await update.message.reply_text(f"✅ *{item}* markerad som klar!", parse_mode="Markdown")
+
+    raw = " ".join(context.args).replace(",", " ")
+    positions = []
+    for part in raw.split():
+        try:
+            positions.append(int(part))
+        except ValueError:
+            pass
+
+    if not positions:
+        await update.message.reply_text("Ange nummer: /klar 1,2,3")
+        return
+
+    deleted = db.delete_items_by_position(positions)
+    if deleted:
+        items_str = ", ".join(deleted)
+        await update.message.reply_text(f"✅ Borttaget: {items_str}", parse_mode="Markdown")
     else:
-        await update.message.reply_text(f"Hittade inte '{item}' i aktiva varor.")
+        await update.message.reply_text("Hittade inga varor med de numren.")
 
 
 async def cmd_angra(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

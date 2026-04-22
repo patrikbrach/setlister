@@ -60,10 +60,8 @@ HELP_TEXT = """🤖 *Tillgängliga kommandon*
 
 *Inköpslista*
 /handla vara1, vara2 — Lägg till varor
-/lista — Visa hela inköpslistan
-/klar vara — Pricka av en vara
-/angra vara — Ta tillbaka en avprickad vara
-/rensa — Ta bort alla avprickade varor
+/lista — Visa numrerad inköpslista
+/klar 1,2,3 — Radera varor med nummer
 /raderalista — Radera hela listan
 
 *Kalender*

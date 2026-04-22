@@ -99,6 +99,22 @@ def get_all_items() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def delete_items_by_position(positions: list[int]) -> list[str]:
+    """Delete active items by 1-based position numbers. Returns list of deleted item names."""
+    with get_connection() as conn:
+        active = conn.execute(
+            "SELECT id, item FROM shopping_list WHERE completed=0 ORDER BY added_at, id"
+        ).fetchall()
+        deleted = []
+        for pos in sorted(set(positions)):
+            if 1 <= pos <= len(active):
+                row = active[pos - 1]
+                conn.execute("DELETE FROM shopping_list WHERE id=?", (row["id"],))
+                deleted.append(row["item"])
+        conn.commit()
+        return deleted
+
+
 def complete_item(item: str, completed_by: str) -> bool:
     """Mark matching active item as completed. Returns True if found."""
     with get_connection() as conn:
