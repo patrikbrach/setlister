@@ -1,0 +1,8 @@
+services:
+  setlister:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SETLIST_API_KEY=${SETLIST_API_KEY}

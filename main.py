@@ -1,21 +1,22 @@
 import asyncio
 import io
 import json
-import webbrowser
+import os
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 
 from excel_reader import parse_excel
 from setlist_client import fetch_setlist
+from pdf_generator import generate_setlist_pdf, safe_filename
 
-# In-memory row storage keyed by upload session
+API_KEY = os.environ.get("SETLIST_API_KEY", "")
+
 _rows: dict[int, dict] = {}
+_results: dict[int, dict] = {}
 
 
 @asynccontextmanager
@@ -23,24 +24,21 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Setlist Lookup", lifespan=lifespan)
+app = FastAPI(title="Setlister", lifespan=lifespan)
+
+from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
 async def index():
-    from fastapi.responses import FileResponse
     return FileResponse("static/index.html")
 
 
 @app.post("/upload")
-async def upload(
-    file: UploadFile = File(...),
-    api_key: str = Form(...),
-):
-    """Parse uploaded xlsx and return list of rows."""
+async def upload(file: UploadFile = File(...)):
     if not file.filename or not file.filename.endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Endast .xlsx-filer stöds.")
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported.")
 
     contents = await file.read()
     try:
@@ -48,8 +46,8 @@ async def upload(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # Store rows globally (simple single-user local app)
     _rows.clear()
+    _results.clear()
     for row in rows:
         _rows[row["id"]] = row
 
@@ -57,45 +55,57 @@ async def upload(
 
 
 @app.get("/fetch/{row_id}")
-async def fetch_row(
-    row_id: int,
-    api_key: str = Query(...),
-):
-    """Fetch setlist for a single row by id."""
+async def fetch_row(row_id: int):
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="SETLIST_API_KEY not configured.")
     if row_id not in _rows:
-        raise HTTPException(status_code=404, detail="Okänt rad-id.")
+        raise HTTPException(status_code=404, detail="Unknown row id.")
 
     row = _rows[row_id]
     async with httpx.AsyncClient() as client:
         result = await fetch_setlist(
             client=client,
-            api_key=api_key,
+            api_key=API_KEY,
             row_id=row_id,
             artist=row["artist"],
             date=row["date"],
             venue=row.get("venue"),
         )
+
+    _results[row_id] = result
     return result
+
+
+@app.get("/pdf/{row_id}")
+async def download_pdf(row_id: int):
+    result = _results.get(row_id)
+    if not result or result.get("status") != "found":
+        raise HTTPException(status_code=404, detail="No setlist result found for this row.")
+
+    pdf_bytes = generate_setlist_pdf(result)
+    filename = safe_filename(result["artist"], result["date"])
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @app.get("/export")
 async def export(results: str = Query(...)):
-    """
-    Generate an xlsx from JSON-encoded results array.
-    results is a JSON string: [{artist, date, venue, songs, setlist_url, status}, ...]
-    """
     import openpyxl
     from openpyxl import Workbook
 
     try:
         data = json.loads(results)
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Ogiltig JSON i results-parametern.")
+        raise HTTPException(status_code=400, detail="Invalid JSON in results parameter.")
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Setlists"
-    ws.append(["Artist", "Datum", "Venue", "Antal låtar", "Setlist.fm URL"])
+    ws.append(["Artist", "Date", "Venue", "Songs", "Setlist.fm URL"])
 
     for item in data:
         if item.get("status") == "found":
@@ -128,5 +138,4 @@ async def export(results: str = Query(...)):
 
 
 if __name__ == "__main__":
-    webbrowser.open("http://localhost:8000")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

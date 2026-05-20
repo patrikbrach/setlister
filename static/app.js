@@ -1,13 +1,12 @@
 (() => {
   // ── State ──────────────────────────────────────────────
   let uploadedFile = null;
-  let allResults = [];
-  let totalRows = 0;
-  let doneCount = 0;
-  let aborted = false;
+  let allResults   = [];
+  let totalRows    = 0;
+  let doneCount    = 0;
+  let aborted      = false;
 
   // ── DOM refs ────────────────────────────────────────────
-  const apiKeyInput  = document.getElementById("api-key");
   const uploadZone   = document.getElementById("upload-zone");
   const fileInput    = document.getElementById("file-input");
   const fileNameEl   = document.getElementById("file-name");
@@ -15,80 +14,81 @@
   const progressWrap = document.getElementById("progress-bar-wrap");
   const progressFill = document.getElementById("progress-fill");
   const progressLbl  = document.getElementById("progress-label");
+  const progressPct  = document.getElementById("progress-pct");
+  const progressTrack = document.getElementById("progress-track");
   const resultsList  = document.getElementById("results");
+  const toolbar      = document.getElementById("toolbar");
   const exportBtn    = document.getElementById("export-btn");
   const errorBanner  = document.getElementById("error-banner");
 
   // ── File drag & drop ────────────────────────────────────
-  uploadZone.addEventListener("click", () => fileInput.click());
   uploadZone.addEventListener("dragover", e => { e.preventDefault(); uploadZone.classList.add("dragover"); });
-  uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("dragover"));
+  uploadZone.addEventListener("dragleave", e => { if (!uploadZone.contains(e.relatedTarget)) uploadZone.classList.remove("dragover"); });
   uploadZone.addEventListener("drop", e => {
     e.preventDefault();
     uploadZone.classList.remove("dragover");
     const f = e.dataTransfer.files[0];
     if (f) setFile(f);
   });
+
   fileInput.addEventListener("change", () => {
     if (fileInput.files[0]) setFile(fileInput.files[0]);
+  });
+
+  uploadZone.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
   });
 
   function setFile(f) {
     uploadedFile = f;
     fileNameEl.textContent = f.name;
+    runBtn.disabled = false;
   }
 
   // ── Run ─────────────────────────────────────────────────
   runBtn.addEventListener("click", startLookup);
 
   async function startLookup() {
-    const apiKey = apiKeyInput.value.trim();
-    if (!apiKey) { showError("Ange en API-nyckel."); return; }
-    if (!uploadedFile) { showError("Välj en Excel-fil (.xlsx)."); return; }
+    if (!uploadedFile) { showError("Please select an Excel file (.xlsx)."); return; }
 
     hideError();
     clearResults();
-    aborted = false;
+    aborted  = false;
     runBtn.disabled = true;
-    exportBtn.style.display = "none";
+    toolbar.style.display = "none";
 
-    // 1. Upload file
     const form = new FormData();
     form.append("file", uploadedFile);
-    form.append("api_key", apiKey);
 
     let rows;
     try {
-      const res = await fetch("/upload", { method: "POST", body: form });
+      const res  = await fetch("/upload", { method: "POST", body: form });
       const body = await res.json();
-      if (!res.ok) { showError(body.detail || "Uppladdning misslyckades."); runBtn.disabled = false; return; }
-      rows = body.rows;
+      if (!res.ok) { showError(body.detail || "Upload failed."); runBtn.disabled = false; return; }
+      rows      = body.rows;
       totalRows = body.total;
-    } catch (e) {
-      showError("Nätverksfel vid uppladdning."); runBtn.disabled = false; return;
+    } catch {
+      showError("Network error during upload."); runBtn.disabled = false; return;
     }
 
-    // 2. Create placeholder cards
     allResults = new Array(totalRows).fill(null);
-    doneCount = 0;
+    doneCount  = 0;
     showProgress(0, totalRows);
 
-    for (const row of rows) {
-      renderPlaceholder(row);
-    }
+    for (const row of rows) renderPlaceholder(row);
 
-    // 3. Fetch each row sequentially (with 0.5 s delay between)
     for (let i = 0; i < rows.length; i++) {
       if (aborted) break;
       const row = rows[i];
+
       try {
-        const res = await fetch(`/fetch/${row.id}?api_key=${encodeURIComponent(apiKey)}`);
+        const res  = await fetch(`/fetch/${row.id}`);
         const data = await res.json();
 
-        if (data.status === "error" && data.message && data.message.includes("401")) {
+        if (data.status === "error" && data.message?.includes("401")) {
           aborted = true;
-          showError("Ogiltig API-nyckel (401). Alla anrop stoppade.");
-          updateCard(row.id, { ...row, status: "error", message: "Ogiltig API-nyckel" });
+          showError("Invalid API key (401). All requests stopped.");
+          updateCard(row.id, { ...row, status: "error", message: "Invalid API key" });
           doneCount++;
           showProgress(doneCount, totalRows);
           break;
@@ -96,23 +96,20 @@
 
         allResults[i] = data;
         updateCard(row.id, data);
-      } catch (e) {
-        const errResult = { id: row.id, status: "error", message: "Nätverksfel", artist: row.artist, date: row.date };
-        allResults[i] = errResult;
-        updateCard(row.id, errResult);
+      } catch {
+        const err = { id: row.id, status: "error", message: "Network error", artist: row.artist, date: row.date };
+        allResults[i] = err;
+        updateCard(row.id, err);
       }
 
       doneCount++;
       showProgress(doneCount, totalRows);
-
-      if (i < rows.length - 1) {
-        await sleep(500);
-      }
+      if (i < rows.length - 1) await sleep(520);
     }
 
     runBtn.disabled = false;
     if (!aborted) {
-      exportBtn.style.display = "flex";
+      toolbar.style.display = "flex";
     }
   }
 
@@ -121,7 +118,9 @@
     progressWrap.style.display = "flex";
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     progressFill.style.width = pct + "%";
-    progressLbl.textContent = `${done} / ${total} klara`;
+    progressTrack.setAttribute("aria-valuenow", pct);
+    progressLbl.textContent = `${done} / ${total} done`;
+    progressPct.textContent = `${pct}%`;
   }
 
   // ── Card rendering ───────────────────────────────────────
@@ -135,10 +134,14 @@
     const card = document.createElement("div");
     card.className = "result-card";
     card.id = `card-${row.id}`;
+    card.setAttribute("role", "listitem");
     card.innerHTML = `
       <div class="result-header">
-        <span class="status-icon"><span class="spinner"></span></span>
-        <span class="result-title">${esc(row.artist)} <span class="meta">– ${formatDate(row.date)}${row.venue ? " – " + esc(row.venue) : ""}</span></span>
+        <span class="status-badge"><span class="spinner"></span></span>
+        <div class="result-info">
+          <div class="result-artist">${esc(row.artist)}</div>
+          <div class="result-meta">${formatDate(row.date)}${row.venue ? " · " + esc(row.venue) : ""}</div>
+        </div>
       </div>`;
     resultsList.appendChild(card);
   }
@@ -150,30 +153,37 @@
     const { status } = data;
     card.className = `result-card ${status === "found" ? "found" : status === "not_found" ? "not-found" : "error"}`;
 
-    const icon = status === "found" ? "✅" : status === "not_found" ? "❌" : "⚠️";
-    const venueDisplay = data.venue || "";
-    const subInfo = [formatDate(data.date), venueDisplay].filter(Boolean).join(" – ");
+    const icon   = status === "found" ? "✓" : status === "not_found" ? "–" : "!";
+    const meta   = [formatDate(data.date), data.venue || ""].filter(Boolean).join(" · ");
+    const songs  = data.songs || [];
+    const songCountLabel = status === "found" ? `${songs.length} tracks` : "";
 
     let bodyHTML = "";
     if (status === "found") {
       bodyHTML = buildSetlistHTML(data);
     } else if (status === "not_found") {
-      bodyHTML = `<p class="status-msg">Ingen setlist hittades för detta datum.</p>`;
+      bodyHTML = `<p class="status-msg">No setlist found for this date.</p>`;
     } else {
-      bodyHTML = `<p class="status-msg" style="color:var(--red)">${esc(data.message || "Okänt fel")}</p>`;
+      bodyHTML = `<p class="status-msg error">${esc(data.message || "Unknown error")}</p>`;
     }
 
     card.innerHTML = `
       <div class="result-header" onclick="toggleCard(${id})">
-        <span class="status-icon">${icon}</span>
-        <span class="result-title">${esc(data.artist)} <span class="meta">– ${esc(subInfo)}</span></span>
-        <span class="expand-icon">▼</span>
+        <span class="status-badge">${icon}</span>
+        <div class="result-info">
+          <div class="result-artist">${esc(data.artist)}</div>
+          <div class="result-meta">${esc(meta)}</div>
+        </div>
+        ${songCountLabel ? `<span class="song-count">${songCountLabel}</span>` : ""}
+        <span class="expand-chevron">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </span>
       </div>
       <div class="result-body">${bodyHTML}</div>`;
   }
 
   function buildSetlistHTML(data) {
-    const songs = data.songs || [];
+    const songs        = data.songs || [];
     const encoreBreaks = new Set(data.encore_breaks || []);
     let html = `<ol class="setlist">`;
 
@@ -181,18 +191,28 @@
       if (encoreBreaks.has(idx)) {
         html += `</ol><div class="encore-divider">Encore</div><ol class="setlist" start="${song.order}">`;
       }
-      const info = song.info ? ` <span class="info">(${esc(song.info)})</span>` : "";
-      html += `<li><span class="num">${song.order}.</span><span>${esc(song.name)}${info}</span></li>`;
+      const info = song.info ? ` <span class="track-info">(${esc(song.info)})</span>` : "";
+      html += `<li>
+        <span class="track-num">${song.order}</span>
+        <span class="track-name">${esc(song.name)}${info}</span>
+      </li>`;
     });
 
-    html += `</ol>`;
+    html += `</ol><div class="card-actions">`;
 
     if (data.setlist_url) {
-      html += `<a class="setlist-link" href="${esc(data.setlist_url)}" target="_blank" rel="noopener">
-        ↗ Öppna på setlist.fm
+      html += `<a class="action-link" href="${esc(data.setlist_url)}" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        setlist.fm
       </a>`;
     }
 
+    html += `<a class="action-link pdf-btn" href="/pdf/${data.id}" download>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Download PDF
+    </a>`;
+
+    html += `</div>`;
     return html;
   }
 
@@ -205,8 +225,7 @@
   // ── Export ───────────────────────────────────────────────
   exportBtn.addEventListener("click", () => {
     const payload = allResults.filter(Boolean);
-    const encoded = encodeURIComponent(JSON.stringify(payload));
-    window.location.href = `/export?results=${encoded}`;
+    window.location.href = `/export?results=${encodeURIComponent(JSON.stringify(payload))}`;
   });
 
   // ── Error banner ─────────────────────────────────────────
@@ -229,12 +248,11 @@
       .replace(/"/g, "&quot;");
   }
 
-  const MONTHS_SV = ["jan","feb","mar","apr","maj","jun","jul","aug","sep","okt","nov","dec"];
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   function formatDate(ddMMYYYY) {
     if (!ddMMYYYY) return "";
     const [dd, mm, yyyy] = ddMMYYYY.split("-");
     if (!dd || !mm || !yyyy) return ddMMYYYY;
-    const monthIdx = parseInt(mm, 10) - 1;
-    return `${parseInt(dd, 10)} ${MONTHS_SV[monthIdx] ?? mm} ${yyyy}`;
+    return `${parseInt(dd, 10)} ${MONTHS[parseInt(mm, 10) - 1] ?? mm} ${yyyy}`;
   }
 })();
